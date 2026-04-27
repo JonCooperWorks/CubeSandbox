@@ -88,6 +88,7 @@ The [`examples/`](examples/) directory provides complete examples based on the o
 | `exec_code.py` | Execute Python code inside a sandbox |
 | `read.py` | Read files from the sandbox filesystem |
 | `pause.py` | Pause a sandbox, wait, then resume and verify state |
+| `snapshot.py` | Snapshot a running sandbox, restore into a new sandbox, verify state survives (Cube extension) |
 | `create_with_mount.py` | Create a sandbox with a host directory mount (Cube extension) |
 | `browser.py` | Launch a sandbox with Chromium and control the browser via Playwright |
 | `test.py` | Multi-threaded stress test: create sandboxes, execute code and commands in a loop |
@@ -131,6 +132,7 @@ python cmd.py
 python exec_code.py
 python read.py
 python pause.py
+python snapshot.py
 python create_with_mount.py
 python browser.py
 python test.py
