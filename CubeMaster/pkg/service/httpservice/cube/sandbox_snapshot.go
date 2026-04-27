@@ -49,6 +49,7 @@ type sandboxSnapshotResponse struct {
 	SnapshotID string   `json:"snapshot_id,omitempty"`
 	Names      []string `json:"names,omitempty"`
 	Path       string   `json:"path,omitempty"`
+	HostIP     string   `json:"host_ip,omitempty"`
 }
 
 // sandboxSnapshotDeleteRequest carries the host that owns the snapshot
@@ -160,6 +161,7 @@ func handleSandboxSnapshotAction(w http.ResponseWriter, r *http.Request, rt *Cub
 		SnapshotID: snapshotID,
 		Names:      names,
 		Path:       commitRsp.GetSnapshotPath(),
+		HostIP:     hostIP,
 	}
 }
 

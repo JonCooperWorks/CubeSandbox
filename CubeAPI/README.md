@@ -33,7 +33,8 @@ The following Sandbox core APIs are **fully E2B-compatible** and can be used dir
 | GET | `/v2/sandboxes/:sandboxID/logs` | Get sandbox logs (v2, cursor-based pagination) | ❌ |
 | POST | `/sandboxes/:sandboxID/timeout` | Set sandbox timeout (absolute TTL) | ❌ |
 | POST | `/sandboxes/:sandboxID/refreshes` | Extend sandbox lifetime (relative TTL) | ❌ |
-| POST | `/sandboxes/:sandboxID/snapshots` | Create a sandbox snapshot | ❌ |
+| POST | `/sandboxes/:sandboxID/snapshots` | Create a sandbox snapshot | ✅ |
+| DELETE | `/sandboxes/snapshots/:snapshotID?hostIP=…` | Delete a sandbox snapshot (fork extension) | ✅ |
 | GET | `/sandboxes/:sandboxID/metrics` | Get sandbox metrics | ❌ |
 | GET | `/sandboxes/snapshots` | List all snapshots for the team | ❌ |
 | PUT | `/sandboxes/:sandboxID/network` | Update sandbox network config (egress rules) | ❌ |
@@ -48,6 +49,7 @@ The following Sandbox core APIs are **fully E2B-compatible** and can be used dir
 |---------|-------------|
 | **Host Directory Mount** | Mount a host directory into the sandbox via `metadata.host-mount` at creation time |
 | **Browser Sandbox** | Built-in Chromium inside the sandbox, exposed via CDP, allowing direct Playwright control |
+| **Restore from snapshot** | Cold-start a new sandbox from a previously captured runtime snapshot by setting `fromSnapshot.path` on `POST /sandboxes`. Path comes from a prior `POST /sandboxes/:sandboxID/snapshots` response. |
 
 ---
 

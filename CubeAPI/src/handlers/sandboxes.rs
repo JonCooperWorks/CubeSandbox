@@ -15,16 +15,17 @@ use crate::{
     constants::ENVD_VERSION,
     cubemaster::{
         CreateSandboxRequest, CubeVSContext, DeleteSandboxRequest, ListSandboxRequest,
-        SandboxLogsRequest, SandboxRefreshRequest, SandboxSnapshotRequest, SandboxTimeoutRequest,
-        SandboxUpdateRequest,
+        SandboxLogsRequest, SandboxRefreshRequest, SandboxSnapshotDeleteRequest,
+        SandboxSnapshotRequest, SandboxTimeoutRequest, SandboxUpdateRequest,
     },
     error::{AppError, AppResult},
     logging::{LogEvent, LogLevel},
     models::{
-        ConnectSandbox, CreateSnapshotRequest, ListSandboxesQuery, ListSandboxesV2Query,
-        LogLevel as ModelLogLevel, NewSandbox, RefreshRequest, ResumedSandbox, Sandbox,
-        SandboxDetail, SandboxLog, SandboxLogEntry, SandboxLogs, SandboxLogsQuery,
-        SandboxLogsV2Query, SandboxLogsV2Response, SandboxState, SetTimeoutRequest, SnapshotInfo,
+        ConnectSandbox, CreateSnapshotRequest, DeleteSnapshotQuery, ListSandboxesQuery,
+        ListSandboxesV2Query, LogLevel as ModelLogLevel, NewSandbox, RefreshRequest,
+        ResumedSandbox, Sandbox, SandboxDetail, SandboxLog, SandboxLogEntry, SandboxLogs,
+        SandboxLogsQuery, SandboxLogsV2Query, SandboxLogsV2Response, SandboxState,
+        SetTimeoutRequest, SnapshotInfo,
     },
     state::AppState,
 };
@@ -312,6 +313,21 @@ pub async fn create_sandbox(
         "cube.master.appsnapshot.template.version".to_string(),
         "v2".to_string(),
     );
+
+    // When the orchestrator supplies fromSnapshot, inject the two shim
+    // annotations that drive a restore from the bundle path. CubeMaster
+    // skips template resolution as soon as it sees the restore flag; the
+    // template_id annotations above stay as labels but are not used.
+    if let Some(ref fs) = body.from_snapshot {
+        annotations.insert(
+            "cube.vm.snapshot.base.path".to_string(),
+            fs.path.clone(),
+        );
+        annotations.insert(
+            "cube.appsnapshot.restore".to_string(),
+            "true".to_string(),
+        );
+    }
 
     // Extract host-dir mount config from metadata into annotations so that
     // CubeMaster's injectHostDirMounts() can pick it up.
@@ -717,6 +733,16 @@ pub async fn create_snapshot(
             } else {
                 resp.names
             };
+            let path = if resp.path.is_empty() {
+                None
+            } else {
+                Some(resp.path)
+            };
+            let host_ip = if resp.host_ip.is_empty() {
+                None
+            } else {
+                Some(resp.host_ip)
+            };
             tracing::info!(sandbox_id = %sandbox_id, snapshot_id = %snapshot_id, "create_snapshot: success");
             state
                 .logger
@@ -728,28 +754,12 @@ pub async fn create_snapshot(
                 .await;
             Ok((
                 StatusCode::CREATED,
-                Json(SnapshotInfo { snapshot_id, names }),
-            ))
-        }
-        Err(ref e) if e.is_endpoint_missing() => {
-            tracing::warn!(
-                sandbox_id = %sandbox_id,
-                "create_snapshot: CubeMaster POST /cube/sandbox/snapshot not available yet"
-            );
-            // Return a placeholder snapshot_id so clients aren't broken
-            let snapshot_id = Uuid::new_v4().to_string();
-            state
-                .logger
-                .log(
-                    LogEvent::new(LogLevel::Warn, "sandbox.snapshot.placeholder")
-                        .field("sandbox_id", &sandbox_id)
-                        .field("snapshot_id", &snapshot_id)
-                        .field("reason", "cubemaster endpoint not yet implemented"),
-                )
-                .await;
-            Ok((
-                StatusCode::CREATED,
-                Json(SnapshotInfo { snapshot_id, names }),
+                Json(SnapshotInfo {
+                    snapshot_id,
+                    names,
+                    path,
+                    host_ip,
+                }),
             ))
         }
         Err(e) if e.is_not_found() => Err(AppError::NotFound(format!(
@@ -1035,6 +1045,66 @@ pub async fn refresh_sandbox(
             LogEvent::new(LogLevel::Info, "sandbox.refreshed")
                 .field("sandbox_id", &sandbox_id)
                 .field_value("duration", duration),
+        )
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ─── DELETE /sandboxes/snapshots/:snapshotID ─────────────────────────────────
+
+pub async fn delete_snapshot(
+    State(state): State<AppState>,
+    Path(snapshot_id): Path<String>,
+    Query(params): Query<DeleteSnapshotQuery>,
+) -> AppResult<impl IntoResponse> {
+    state
+        .logger
+        .log(
+            LogEvent::new(LogLevel::Debug, "api.request")
+                .field("handler", "delete_snapshot")
+                .field("snapshot_id", &snapshot_id)
+                .field("host_ip", &params.host_ip),
+        )
+        .await;
+
+    if params.host_ip.trim().is_empty() {
+        return Err(AppError::BadRequest(
+            "hostIP query parameter is required".to_string(),
+        ));
+    }
+
+    let req = SandboxSnapshotDeleteRequest {
+        request_id: Uuid::new_v4().to_string(),
+        snapshot_id: snapshot_id.clone(),
+        host_ip: params.host_ip.clone(),
+    };
+
+    let resp = state
+        .cubemaster
+        .delete_sandbox_snapshot(&req)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, snapshot_id = %snapshot_id, "delete_snapshot: cubemaster error");
+            if e.is_not_found() {
+                AppError::NotFound(format!("snapshot {} not found", snapshot_id))
+            } else {
+                AppError::Internal(anyhow::anyhow!(e.to_string()))
+            }
+        })?;
+    resp.ret.into_result().map_err(|e| {
+        if e.is_not_found() {
+            AppError::NotFound(format!("snapshot {} not found", snapshot_id))
+        } else {
+            AppError::Internal(anyhow::anyhow!(e.to_string()))
+        }
+    })?;
+
+    tracing::info!(snapshot_id = %snapshot_id, "delete_snapshot: success");
+    state
+        .logger
+        .log(
+            LogEvent::new(LogLevel::Info, "sandbox.snapshot.deleted")
+                .field("snapshot_id", &snapshot_id),
         )
         .await;
     Ok(StatusCode::NO_CONTENT)

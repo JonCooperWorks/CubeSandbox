@@ -106,6 +106,29 @@ pub struct NewSandbox {
 
     #[serde(rename = "volumeMounts", skip_serializing_if = "Option::is_none")]
     pub volume_mounts: Option<Vec<SandboxVolumeMount>>,
+
+    /// Fork-local extension: when present, the new sandbox is restored
+    /// from the supplied on-disk snapshot bundle instead of cold-booted
+    /// from the template. The orchestrator persists snapshot metadata
+    /// (path, host_ip) returned by `POST /sandboxes/{id}/snapshots` and
+    /// supplies it back here.
+    #[serde(rename = "fromSnapshot", skip_serializing_if = "Option::is_none")]
+    pub from_snapshot: Option<FromSnapshot>,
+}
+
+/// Snapshot reference for restore-on-create.
+#[derive(Debug, Deserialize, Clone)]
+pub struct FromSnapshot {
+    pub path: String,
+}
+
+/// Query string for `DELETE /sandboxes/snapshots/{snapshotID}`. CubeMaster
+/// keeps no snapshot index, so the orchestrator must hand back the host
+/// that owns the blob (returned in the create response as `hostIP`).
+#[derive(Debug, Deserialize)]
+pub struct DeleteSnapshotQuery {
+    #[serde(rename = "hostIP", alias = "host_ip")]
+    pub host_ip: String,
 }
 
 fn default_timeout() -> i32 {
@@ -240,6 +263,15 @@ pub struct SnapshotInfo {
     #[serde(rename = "snapshotID")]
     pub snapshot_id: String,
     pub names: Vec<String>,
+    /// On-disk directory holding the snapshot bundle. Returned so the
+    /// orchestrator can persist its own (snapshot_id -> path) mapping
+    /// without a follow-up query.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// IP of the node that owns the blob. Required when the
+    /// orchestrator later asks to delete the snapshot.
+    #[serde(rename = "hostIP", skip_serializing_if = "Option::is_none")]
+    pub host_ip: Option<String>,
 }
 
 // ─── Sandbox — logs ────────────────────────────────────────────────────────

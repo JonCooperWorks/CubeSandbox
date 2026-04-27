@@ -40,7 +40,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/sandboxes/:sandboxID/pause", post(sandboxes::pause_sandbox))
         .route("/sandboxes/:sandboxID/resume", post(sandboxes::resume_sandbox))
         .route("/sandboxes/:sandboxID/connect", post(sandboxes::connect_sandbox))
-        .route("/sandboxes/:sandboxID/snapshots", post(sandboxes::create_snapshot));
+        .route("/sandboxes/:sandboxID/snapshots", post(sandboxes::create_snapshot))
+        .route("/sandboxes/snapshots/:snapshotID", delete(sandboxes::delete_snapshot));
 
     // Conditionally attach rate-limit + unified auth
     let sandbox_routes = if auth_configured {
