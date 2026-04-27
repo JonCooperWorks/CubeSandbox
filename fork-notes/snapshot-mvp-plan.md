@@ -82,20 +82,26 @@ All confirmed by reading the code:
 
 ## What's actually missing
 
-Three things, none of them require new persistent state in Cube:
+Three things, none of them require new persistent state, new protos,
+or any Cubelet changes:
 
 1. **CubeMaster HTTP endpoint that exposes `CommitSandbox`.** The
    internal call wiring already exists (`pkg/cubelet/actions.go:59`,
-   used by templatecenter). We just need an HTTP handler that the
-   CubeAPI placeholder calls into. Could match the shape CubeAPI already
-   tries to call (`POST /cube/sandbox/snapshot`).
+   used by templatecenter). The CubeAPI placeholder is hardcoded to
+   call `POST /cube/sandbox/snapshot` — match that path.
 
-2. **CubeMaster HTTP endpoint that creates a sandbox from an arbitrary
-   snapshot path.** Today, restore is implicit: "create with
-   templateID" looks up the template's snapshot dir and restores. We
-   need the same path with the directory provided directly by the
-   caller. Cubelet's restore-by-path code already exists (`Sandbox::restore_vm`)
-   — this is purely an orchestration seam.
+2. **CubeMaster HTTP endpoint that creates a sandbox from a
+   caller-supplied snapshot path.** The shim already supports this
+   via two annotations (verified):
+   - `cube.vm.snapshot.base.path` — sets the restore source directory
+     (`CubeShim/shim/src/sandbox/config.rs:27`, `:113`).
+   - `cube.appsnapshot.restore` — forces restore-or-fail mode
+     (`CubeShim/shim/src/sandbox/config.rs:29`, `sb.rs:759–767`).
+   `RunCubeSandboxRequest.annotations` flows verbatim from CubeMaster
+   through Cubelet to the shim (`Cubelet/services/cubebox/cube_container_create.go:156`).
+   Cubelet declares the keys as first-class constants
+   (`Cubelet/pkg/constants/const.go:226–231`). Pure orchestration: the
+   new handler injects these annotations and calls existing `Run`.
 
 3. **CubeAPI plumbing.** Kill the placeholder, expose snapshot create
    with caller-provided ID, expose create-from-snapshot, expose
@@ -152,26 +158,25 @@ upstream `main`, each individually proposable.
 ### Chunk A — CubeMaster HTTP exposure
 
 Files: `CubeMaster/pkg/service/httpservice/cube/` (new
-`sandbox_snapshot.go`).
+`sandbox_snapshot.go`), plus action constants + dispatch case in
+`cube.go`.
 
 - `POST /cube/sandbox/snapshot` — accepts `(sandbox_id, snapshot_id)`,
   forwards to existing internal `cubelet.CommitSandbox` action with
   `TemplateID = snapshot_id` and `SnapshotDir = <snapshots base>`.
   Returns `{ path }`.
 - `POST /cube/sandbox/from-snapshot` — accepts `(snapshot_path,
-  sandbox_spec)`, calls Cubelet's create path with restore-from-path
-  threaded through. **This is the one new orchestration seam.** Cubelet
-  already has `Sandbox::restore_vm`; we need a Cubelet-side hook that
-  takes the path from outside instead of looking it up via template
-  registry.
+  sandbox_spec)`, builds a normal `RunCubeSandboxRequest` with two
+  annotations injected:
+  ```
+  cube.vm.snapshot.base.path = <snapshot_path>
+  cube.appsnapshot.restore   = "true"
+  ```
+  and calls the existing internal Run path. No proto changes, no
+  Cubelet code changes.
 - `DELETE /cube/sandbox/snapshot` — accepts `(path)`, validates
   containment under the snapshots base dir, `RemoveAll`s.
 - Mirror auth scoping from existing sandbox endpoints.
-
-The "Cubelet-side hook" for restore-by-path may already exist — needs a
-30-min trace before this chunk starts. If it doesn't, add a minimal
-parameter on the existing create RPC (`SnapshotPathOverride` or similar)
-that bypasses template lookup. Additive proto change, single field.
 
 ### Chunk B — CubeAPI: kill the placeholder, expose restore + delete
 
@@ -203,14 +208,11 @@ chunk; biggest upstream interest.
 
 ## Sequencing
 
-1. 30-min spike: confirm whether Cubelet's create-sandbox path can
-   accept a snapshot path override today. Determines whether Chunk A
-   touches Cubelet protos.
-2. Chunk A (CubeMaster).
-3. Chunk B (CubeAPI) once A is reachable.
-4. Chunk C gates "done."
-5. Open upstream issue **before** Chunk A — at minimum, ask whether
-   they have an internal snapshot API design and want to align.
+1. Chunk A (CubeMaster HTTP).
+2. Chunk B (CubeAPI) once A is reachable.
+3. Chunk C gates "done."
+
+Upstream issue is optional, not a gate — fork-only is fine for now.
 
 ## Mergeability discipline
 
@@ -225,17 +227,6 @@ chunk; biggest upstream interest.
 - Open the upstream issue before Chunk A. Forcing function for clean diffs.
 
 ## Open questions
-
-- **Does Cubelet's existing create path accept an arbitrary snapshot
-  path override, or is restore strictly via registered template?**
-  Answer determines if Chunk A is pure CubeMaster work or also a small
-  Cubelet proto extension. 30-min code read in
-  `Cubelet/services/cubebox/` and `CubeShim/shim/src/sandbox/sb.rs`.
-
-- **Should `DELETE /sandboxes/snapshots` accept the path or a
-  snapshot_id?** Path is simpler given Cube has no index. ID would
-  require Cube to derive the path from the ID — but the orchestrator
-  already knows the path, so just send it. Pick path.
 
 - **Restore-failure rollback.** Cubelet returns failure → CubeMaster
   returns failure → CubeAPI returns failure → orchestrator never sees a
