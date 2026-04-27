@@ -33,7 +33,8 @@ The following Sandbox core APIs are **fully E2B-compatible** and can be used dir
 | GET | `/v2/sandboxes/:sandboxID/logs` | Get sandbox logs (v2, cursor-based pagination) | ❌ |
 | POST | `/sandboxes/:sandboxID/timeout` | Set sandbox timeout (absolute TTL) | ❌ |
 | POST | `/sandboxes/:sandboxID/refreshes` | Extend sandbox lifetime (relative TTL) | ❌ |
-| POST | `/sandboxes/:sandboxID/snapshots` | Create a sandbox snapshot | ❌ |
+| POST | `/sandboxes/:sandboxID/snapshots` | Create a sandbox snapshot | ✅ |
+| DELETE | `/sandboxes/snapshots/:snapshotID?hostIP=…` | Delete a sandbox snapshot (fork extension) | ✅ |
 | GET | `/sandboxes/:sandboxID/metrics` | Get sandbox metrics | ❌ |
 | GET | `/sandboxes/snapshots` | List all snapshots for the team | ❌ |
 | PUT | `/sandboxes/:sandboxID/network` | Update sandbox network config (egress rules) | ❌ |
@@ -48,6 +49,7 @@ The following Sandbox core APIs are **fully E2B-compatible** and can be used dir
 |---------|-------------|
 | **Host Directory Mount** | Mount a host directory into the sandbox via `metadata.host-mount` at creation time |
 | **Browser Sandbox** | Built-in Chromium inside the sandbox, exposed via CDP, allowing direct Playwright control |
+| **Restore from snapshot** | Cold-start a new sandbox from a previously captured runtime snapshot by setting `fromSnapshot.path` on `POST /sandboxes`. Path comes from a prior `POST /sandboxes/:sandboxID/snapshots` response. |
 
 ---
 
@@ -86,6 +88,7 @@ The [`examples/`](examples/) directory provides complete examples based on the o
 | `exec_code.py` | Execute Python code inside a sandbox |
 | `read.py` | Read files from the sandbox filesystem |
 | `pause.py` | Pause a sandbox, wait, then resume and verify state |
+| `snapshot.py` | Snapshot a running sandbox, restore into a new sandbox, verify state survives (Cube extension) |
 | `create_with_mount.py` | Create a sandbox with a host directory mount (Cube extension) |
 | `browser.py` | Launch a sandbox with Chromium and control the browser via Playwright |
 | `test.py` | Multi-threaded stress test: create sandboxes, execute code and commands in a loop |
@@ -129,6 +132,7 @@ python cmd.py
 python exec_code.py
 python read.py
 python pause.py
+python snapshot.py
 python create_with_mount.py
 python browser.py
 python test.py

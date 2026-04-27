@@ -185,7 +185,6 @@ impl CubeMasterClient {
     }
 
     /// POST /cube/sandbox/snapshot — create a named runtime snapshot.
-    /// ❌ New API required on CubeMaster.
     pub async fn create_sandbox_snapshot(
         &self,
         req: &SandboxSnapshotRequest,
@@ -201,6 +200,22 @@ impl CubeMasterClient {
         parse_response(resp).await
     }
 
+    /// POST /cube/sandbox/snapshot/delete — drop a runtime snapshot
+    /// blob from the host that owns it.
+    pub async fn delete_sandbox_snapshot(
+        &self,
+        req: &SandboxSnapshotDeleteRequest,
+    ) -> Result<SandboxSnapshotDeleteResponse, CubeMasterError> {
+        let url = format!("{}/cube/sandbox/snapshot/delete", self.base_url);
+        let resp = self
+            .inner
+            .post(&url)
+            .json(req)
+            .send()
+            .await
+            .map_err(CubeMasterError::Http)?;
+        parse_response(resp).await
+    }
     }
 
 // ─── Error ─────────────────────────────────────────────────────────────────
@@ -900,6 +915,33 @@ pub struct SandboxSnapshotResponse {
     pub snapshot_id: String,
     #[serde(default)]
     pub names: Vec<String>,
+    /// On-disk directory holding the snapshot bundle. Set by CubeMaster.
+    #[serde(default)]
+    pub path: String,
+    /// Host that owns the blob. Returned so callers can plumb it back
+    /// for delete.
+    #[serde(default, rename = "host_ip", alias = "hostIP")]
+    pub host_ip: String,
+    pub ret: RetCode,
+}
+
+// ─── Sandbox snapshot delete ──────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct SandboxSnapshotDeleteRequest {
+    #[serde(rename = "requestID")]
+    pub request_id: String,
+    pub snapshot_id: String,
+    pub host_ip: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct SandboxSnapshotDeleteResponse {
+    #[serde(rename = "RequestID", alias = "requestID", default)]
+    pub request_id: String,
+    #[serde(default)]
+    pub snapshot_id: String,
     pub ret: RetCode,
 }
 

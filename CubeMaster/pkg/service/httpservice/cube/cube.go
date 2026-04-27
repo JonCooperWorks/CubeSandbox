@@ -26,6 +26,8 @@ const (
 	SandboxExecAction              = "/sandbox/exec"
 	SandboxUpdateAction            = "/sandbox/update"
 	SandboxCommitAction            = "/sandbox/commit"
+	SandboxSnapshotAction          = "/sandbox/snapshot"
+	SandboxSnapshotDeleteAction    = "/sandbox/snapshot/delete"
 	TemplateAction                 = "/template"
 	TemplateRedoAction             = "/template/redo"
 	TemplateBuildStatusAction      = "/template/build"
@@ -65,6 +67,10 @@ func HttpHandler(w http.ResponseWriter, r *http.Request) {
 		rsp = handleUpdateAction(w, r, rt)
 	case r.URL.Path == actionURI(SandboxCommitAction):
 		rsp = handleSandboxCommitAction(w, r, rt)
+	case r.URL.Path == actionURI(SandboxSnapshotDeleteAction):
+		rsp = handleSandboxSnapshotDeleteAction(w, r, rt)
+	case r.URL.Path == actionURI(SandboxSnapshotAction):
+		rsp = handleSandboxSnapshotAction(w, r, rt)
 	case r.URL.Path == actionURI(TemplateAction):
 		rsp = handleTemplateAction(w, r, rt)
 	case r.URL.Path == actionURI(TemplateRedoAction):
