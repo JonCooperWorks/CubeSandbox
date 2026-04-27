@@ -98,6 +98,7 @@ resolve_control_plane_cubemaster_addr() {
 start_with_pidfile() {
   local name="$1"
   local cmd="$2"
+  local runas="${3:-}"
   local pid_file="${RUNTIME_DIR}/${name}.pid"
   local log_file="${LOG_DIR}/${name}.log"
   local clean_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -114,15 +115,44 @@ start_with_pidfile() {
     rm -f "${pid_file}"
   fi
 
-  nohup env -i \
-    PATH="${clean_path}" \
-    HOME="${clean_home}" \
-    LANG="${clean_lang}" \
-    SHELL="/bin/bash" \
-    bash -c "${cmd}" >"${log_file}" 2>&1 &
+  if [[ -n "${runas}" ]]; then
+    require_cmd runuser
+    id "${runas}" >/dev/null 2>&1 || die "runas user '${runas}' does not exist"
+    nohup env -i \
+      PATH="${clean_path}" \
+      HOME="/tmp" \
+      LANG="${clean_lang}" \
+      SHELL="/bin/bash" \
+      runuser -u "${runas}" -- bash -c "${cmd}" >"${log_file}" 2>&1 &
+  else
+    nohup env -i \
+      PATH="${clean_path}" \
+      HOME="${clean_home}" \
+      LANG="${clean_lang}" \
+      SHELL="/bin/bash" \
+      bash -c "${cmd}" >"${log_file}" 2>&1 &
+  fi
   local new_pid=$!
   echo "${new_pid}" >"${pid_file}"
-  log "started ${name} pid=${new_pid} log=${log_file}"
+  log "started ${name} pid=${new_pid} log=${log_file}${runas:+ runas=${runas}}"
+
+  # When launched via runuser, ${new_pid} is the runuser wrapper (root);
+  # the actual service runs as ${runas} as a child. Refresh the pidfile
+  # to point at the service pid so stop_by_pidfile + ps -fp see the
+  # right thing.
+  if [[ -n "${runas}" ]]; then
+    local i child_pid=""
+    for ((i = 1; i <= 10; i++)); do
+      child_pid="$(pgrep -P "${new_pid}" -u "${runas}" | head -n1 || true)"
+      if [[ -n "${child_pid}" ]]; then
+        echo "${child_pid}" >"${pid_file}"
+        log "refreshed ${name} pid=${child_pid} (wrapper was ${new_pid})"
+        return 0
+      fi
+      sleep 1
+    done
+    log "${name} pidfile refresh skipped (no ${runas}-owned child of ${new_pid})"
+  fi
 }
 
 first_pid_by_pattern() {
