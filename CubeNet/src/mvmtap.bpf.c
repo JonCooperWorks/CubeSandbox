@@ -477,17 +477,20 @@ int from_cube(struct __sk_buff *skb)
 		return TC_ACT_SHOT;
 
 	if (daddr == mvm_gateway_ip) {
-		/* Filter traffic to cubegw0:
-		 * allow ICMP, allow TCP non-SYN, drop everything else.
+		/* Cube → host on the cube-dev overlay.  Allow ICMP and TCP
+		 * (including SYN) so the sandbox can initiate connections to
+		 * host-local services bound on cubegw0_ip — the symmetric
+		 * counterpart of from_envoy's host→sandbox path on cube-dev.
+		 *
+		 * Sandboxes must target mvm_gateway_ip (169.254.68.5), not
+		 * cubegw0_ip directly: from_envoy rewrites the reply's source
+		 * to mvm_gateway_ip, so anything else creates an asymmetric
+		 * 5-tuple that the sandbox's TCP stack RSTs on arrival.
 		 */
 		switch (proto) {
 		case IPPROTO_ICMP:
 			break;
 		case IPPROTO_TCP:
-			if (!__pull_headers(skb, &l2, &l3, &l4))
-				return TC_ACT_SHOT;
-			if (l4->syn && !l4->ack)
-				return TC_ACT_SHOT;
 			break;
 		default:
 			return TC_ACT_SHOT;
