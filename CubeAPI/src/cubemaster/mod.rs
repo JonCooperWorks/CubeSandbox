@@ -908,10 +908,11 @@ pub struct SandboxSnapshotRequest {
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 pub struct SandboxSnapshotResponse {
-    #[serde(rename = "RequestID", alias = "requestID")]
+    #[serde(rename = "RequestID", alias = "requestID", default)]
     pub request_id: String,
     #[serde(rename = "sandboxID", default)]
     pub sandbox_id: String,
+    #[serde(default)]
     pub snapshot_id: String,
     #[serde(default)]
     pub names: Vec<String>,
