@@ -994,3 +994,77 @@ async fn parse_response<T: for<'de> Deserialize<'de>>(
     serde_json::from_str::<T>(&body)
         .map_err(|e| CubeMasterError::Deserialize(format!("{e}: body={body}")))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression for 782e721: CubeMaster's success-path snapshot
+    /// payload does not include a `requestID` (the Go server's `Res`
+    /// embed has `omitempty` and the value is empty unless the caller
+    /// supplied one).  Earlier the Rust struct made `request_id`
+    /// required, so this body would fail with `missing field
+    /// 'RequestID'` and CubeAPI would return 500 to dyson-swarm even
+    /// though the snapshot succeeded — leaving rotation pipelines
+    /// hung waiting on a snapshot that was already on disk.
+    #[test]
+    fn snapshot_response_deserialises_without_request_id() {
+        let body = r#"{
+            "ret": {"ret_code": 200, "ret_msg": ""},
+            "sandboxID": "0bedf0a224e649dc8c682c24fdc1d995",
+            "snapshot_id": "smoke-3",
+            "names": ["smoke-3"]
+        }"#;
+        let resp: SandboxSnapshotResponse =
+            serde_json::from_str(body).expect("snapshot success body must deserialise without requestID");
+        assert_eq!(resp.snapshot_id, "smoke-3");
+        assert_eq!(resp.sandbox_id, "0bedf0a224e649dc8c682c24fdc1d995");
+        assert_eq!(resp.request_id, "");
+        assert_eq!(resp.ret.ret_code, 200);
+    }
+
+    /// Error-path payloads can carry neither `requestID` nor
+    /// `snapshot_id` (e.g. the early-return blocks in
+    /// CubeMaster/pkg/service/httpservice/cube/sandbox_snapshot.go
+    /// that fire on missing sandboxID or upstream commit failures).
+    /// CubeAPI must still parse those so the upper layer sees the
+    /// real ret_code instead of a deserialiser error.
+    #[test]
+    fn snapshot_response_deserialises_error_envelope() {
+        let body = r#"{"ret": {"ret_code": 130400, "ret_msg": "sandboxID is required"}}"#;
+        let resp: SandboxSnapshotResponse =
+            serde_json::from_str(body).expect("error envelope must deserialise even with no fields beyond ret");
+        assert_eq!(resp.request_id, "");
+        assert_eq!(resp.snapshot_id, "");
+        assert_eq!(resp.ret.ret_code, 130400);
+    }
+
+    /// Belt-and-braces: when CubeMaster does include `requestID`
+    /// (either capitalisation), it round-trips correctly.  Guards
+    /// against a careless edit dropping the alias and silently
+    /// throwing the field away on real production payloads.
+    #[test]
+    fn snapshot_response_accepts_both_request_id_casings() {
+        for body in [
+            r#"{"ret":{"ret_code":200,"ret_msg":""},"RequestID":"abc-123","snapshot_id":"s"}"#,
+            r#"{"ret":{"ret_code":200,"ret_msg":""},"requestID":"abc-123","snapshot_id":"s"}"#,
+        ] {
+            let resp: SandboxSnapshotResponse =
+                serde_json::from_str(body).expect("both casings must parse");
+            assert_eq!(resp.request_id, "abc-123", "body: {body}");
+        }
+    }
+
+    /// Same shape on the delete response — error-path delete bodies
+    /// drop snapshot_id, and the success-path body lacks requestID
+    /// when the caller didn't supply one.
+    #[test]
+    fn snapshot_delete_response_deserialises_minimal() {
+        let body = r#"{"ret":{"ret_code":200,"ret_msg":""}}"#;
+        let resp: SandboxSnapshotDeleteResponse =
+            serde_json::from_str(body).expect("delete envelope-only body must deserialise");
+        assert_eq!(resp.snapshot_id, "");
+        assert_eq!(resp.request_id, "");
+        assert_eq!(resp.ret.ret_code, 200);
+    }
+}
