@@ -22,7 +22,8 @@ import (
 )
 
 func getCubeboxReqTemplate() (*types.CreateCubeSandboxReq, error) {
-	if config.GetConfig().ReqTemplateConf == nil || config.GetConfig().ReqTemplateConf.CubeBoxReqTemplate == "" {
+	cfg := config.GetConfig()
+	if cfg == nil || cfg.ReqTemplateConf == nil || cfg.ReqTemplateConf.CubeBoxReqTemplate == "" {
 		return nil, errors.New("cubebox instance type requires CubeBoxReqTemplate configuration")
 	}
 
@@ -324,10 +325,22 @@ func dealCubeboxCreateReqWithTemplate(ctx context.Context, reqInOut *types.Creat
 
 	// When the caller is restoring from a runtime snapshot it supplies
 	// the on-disk path directly via cube.vm.snapshot.base.path and
-	// cube.appsnapshot.restore (consumed by the shim). Skip template
-	// resolution but still apply cold-start compatibility so that
-	// network metadata gets populated.
+	// cube.appsnapshot.restore (consumed by the shim). The restore
+	// request still arrives with empty Containers/Volumes, so we have
+	// to hydrate them from the original template (looked up via
+	// cube.master.appsnapshot.template.id) before falling through to
+	// cold-start compat for netID. The two shim annotations are
+	// re-asserted after template merge in case the template happens
+	// to define them.
 	if _, ok := reqInOut.Annotations[shimAnnoAppSnapshotRestore]; ok {
+		preserved := preserveShimRestoreAnnotations(reqInOut.Annotations)
+		templateID := reqInOut.Annotations[constants.CubeAnnotationAppSnapshotTemplateID]
+		if templateID != "" {
+			if err := dealCubeboxCreateReqWithTemplateCenter(ctx, templateID, reqInOut); err != nil {
+				return fmt.Errorf("snapshot-restore template hydrate: %w", err)
+			}
+		}
+		restoreShimRestoreAnnotations(reqInOut, preserved)
 		return handleColdStartCompatibility(reqInOut)
 	}
 
@@ -344,6 +357,35 @@ func dealCubeboxCreateReqWithTemplate(ctx context.Context, reqInOut *types.Creat
 	return dealCubeboxReqTemplateByLocalConfig(ctx, reqInOut)
 }
 
+// preserveShimRestoreAnnotations snapshots the two shim-restore
+// annotations so the template-merge step (which can copy template
+// annotations on top of request annotations) cannot accidentally
+// shadow them. Returns the keys actually present.
+func preserveShimRestoreAnnotations(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, k := range []string{shimAnnoAppSnapshotRestore, shimAnnoVMSnapshotBasePath} {
+		if v, ok := in[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func restoreShimRestoreAnnotations(req *types.CreateCubeSandboxReq, preserved map[string]string) {
+	if len(preserved) == 0 {
+		return
+	}
+	if req.Annotations == nil {
+		req.Annotations = make(map[string]string, len(preserved))
+	}
+	for k, v := range preserved {
+		req.Annotations[k] = v
+	}
+}
+
 // shim annotation keys consumed by CubeShim (cube.vm.snapshot.base.path
 // + cube.appsnapshot.restore). Defined in
 // CubeShim/shim/src/sandbox/config.rs:27,29.
@@ -351,6 +393,16 @@ const (
 	shimAnnoVMSnapshotBasePath = "cube.vm.snapshot.base.path"
 	shimAnnoAppSnapshotRestore = "cube.appsnapshot.restore"
 )
+
+// defaultColdStartNetID is the value handleColdStartCompatibility
+// injects when neither the inbound request nor the host's
+// CubeBoxReqTemplate carries a `com.netid` annotation. Stock cube
+// installs ship a CubeBoxReqTemplate with no annotations block at all,
+// which used to make every restore-from-snapshot 5xx with
+// `netID is missing in CubeBoxReqTemplate`. Downstream consumers only
+// require a non-empty string, so a stable default unblocks the
+// restore path without forcing operators to patch host config.
+const defaultColdStartNetID = "default"
 
 func handleColdStartCompatibility(reqInOut *types.CreateCubeSandboxReq) error {
 
@@ -364,13 +416,16 @@ func handleColdStartCompatibility(reqInOut *types.CreateCubeSandboxReq) error {
 
 	templateReq, err := getCubeboxReqTemplate()
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal CubeBoxReqTemplate: %w", err)
+		// Even a missing CubeBoxReqTemplate must not wedge the cold
+		// start: synthesise the default so the restore can proceed.
+		reqInOut.Annotations[constants.AnnotationsNetID] = defaultColdStartNetID
+		return nil
 	}
-	netID, ok := templateReq.Annotations[constants.AnnotationsNetID]
-	if !ok {
-		return errors.New("netID is missing in CubeBoxReqTemplate")
+	if netID, ok := templateReq.Annotations[constants.AnnotationsNetID]; ok && netID != "" {
+		reqInOut.Annotations[constants.AnnotationsNetID] = netID
+		return nil
 	}
-	reqInOut.Annotations[constants.AnnotationsNetID] = netID
+	reqInOut.Annotations[constants.AnnotationsNetID] = defaultColdStartNetID
 	return nil
 }
 
@@ -383,7 +438,7 @@ func dealCubeboxCreateReqWithTemplateCenter(ctx context.Context, templateID stri
 	if templateID == "" {
 		return errors.New("templateID is empty")
 	}
-	templateReq, err := templatecenter.GetTemplateRequest(ctx, templateID)
+	templateReq, err := getTemplateRequestFn(ctx, templateID)
 	if err != nil {
 		return fmt.Errorf("failed to get template param from store: %w", err)
 	}
