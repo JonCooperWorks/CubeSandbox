@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
@@ -21,6 +23,23 @@ import (
 	"github.com/tencentcloud/CubeSandbox/CubeMaster/pkg/service/sandbox/types"
 	"github.com/tencentcloud/CubeSandbox/cubelog"
 )
+
+// defaultCubeSnapshotRoot is the on-disk layout cube-runtime writes
+// snapshot bundles into (`<root>/<templateID>/<NCnnnnM>`). Cubelet's
+// CommitSandbox already returns a SnapshotPath that points at the
+// spec subdir, but when its underlying CommitSandbox RPC returns "",
+// CubeAPI's strict deserialiser rejects the response. Derive a base
+// path of `<root>/<snapshotID>` so callers always receive something
+// usable; the cube-side resolveSnapshotPaths joins the spec subdir
+// from the restore request's resource block.
+const defaultCubeSnapshotRoot = "/usr/local/services/cubetoolbox/cube-snapshot/cubebox"
+
+func cubeSnapshotRoot() string {
+	if v := strings.TrimSpace(os.Getenv("CUBE_SNAPSHOT_ROOT")); v != "" {
+		return v
+	}
+	return defaultCubeSnapshotRoot
+}
 
 // sandboxSnapshotRequest mirrors the shape CubeAPI already POSTs at
 // /cube/sandbox/snapshot (see CubeAPI/src/cubemaster/mod.rs:876).
@@ -48,8 +67,13 @@ type sandboxSnapshotResponse struct {
 	SandboxID  string   `json:"sandboxID,omitempty"`
 	SnapshotID string   `json:"snapshot_id,omitempty"`
 	Names      []string `json:"names,omitempty"`
-	Path       string   `json:"path,omitempty"`
-	HostIP     string   `json:"host_ip,omitempty"`
+	// Path is always emitted: a strict-deserialising orchestrator
+	// (CubeAPI, swarm) treats a missing field as a 5xx-worthy error.
+	// When cubelet's CommitSandbox returns an empty path we synthesise
+	// `<CUBE_SNAPSHOT_ROOT>/<snapshotID>` so the caller always has a
+	// base path to feed back via fromSnapshot.
+	Path   string `json:"path"`
+	HostIP string `json:"host_ip,omitempty"`
 }
 
 // sandboxSnapshotDeleteRequest carries the host that owns the snapshot
@@ -152,6 +176,11 @@ func handleSandboxSnapshotAction(w http.ResponseWriter, r *http.Request, rt *Cub
 
 	rt.RequestID = req.RequestID
 	rt.RetCode = int64(errorcode.ErrorCode_Success)
+	snapshotPath := strings.TrimSpace(commitRsp.GetSnapshotPath())
+	if snapshotPath == "" {
+		snapshotPath = filepath.Join(cubeSnapshotRoot(), snapshotID)
+		log.G(ctx).Infof("cubelet returned empty snapshot path; deriving %s", snapshotPath)
+	}
 	return &sandboxSnapshotResponse{
 		Res: &types.Res{
 			RequestID: req.RequestID,
@@ -160,7 +189,7 @@ func handleSandboxSnapshotAction(w http.ResponseWriter, r *http.Request, rt *Cub
 		SandboxID:  req.SandboxID,
 		SnapshotID: snapshotID,
 		Names:      names,
-		Path:       commitRsp.GetSnapshotPath(),
+		Path:       snapshotPath,
 		HostIP:     hostIP,
 	}
 }
