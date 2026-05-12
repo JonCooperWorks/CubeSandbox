@@ -322,6 +322,15 @@ func dealCubeboxCreateReqWithTemplate(ctx context.Context, reqInOut *types.Creat
 	}
 	constants.NormalizeAppSnapshotAnnotations(reqInOut.Annotations)
 
+	// When the caller is restoring from a runtime snapshot it supplies
+	// the on-disk path directly via cube.vm.snapshot.base.path and
+	// cube.appsnapshot.restore (consumed by the shim). Skip template
+	// resolution but still apply cold-start compatibility so that
+	// network metadata gets populated.
+	if _, ok := reqInOut.Annotations[shimAnnoAppSnapshotRestore]; ok {
+		return handleColdStartCompatibility(reqInOut)
+	}
+
 	templateID, hasTemplateID := reqInOut.Annotations[constants.CubeAnnotationAppSnapshotTemplateID]
 
 	if !hasTemplateID && config.GetConfig().Common.EnableAGSColdStartSwitch {
@@ -334,6 +343,14 @@ func dealCubeboxCreateReqWithTemplate(ctx context.Context, reqInOut *types.Creat
 
 	return dealCubeboxReqTemplateByLocalConfig(ctx, reqInOut)
 }
+
+// shim annotation keys consumed by CubeShim (cube.vm.snapshot.base.path
+// + cube.appsnapshot.restore). Defined in
+// CubeShim/shim/src/sandbox/config.rs:27,29.
+const (
+	shimAnnoVMSnapshotBasePath = "cube.vm.snapshot.base.path"
+	shimAnnoAppSnapshotRestore = "cube.appsnapshot.restore"
+)
 
 func handleColdStartCompatibility(reqInOut *types.CreateCubeSandboxReq) error {
 
