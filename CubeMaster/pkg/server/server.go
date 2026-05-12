@@ -72,10 +72,22 @@ func NewInternalHttp(ctx context.Context, cfg *config.Config) (*internalHttp, er
 }
 
 func (s *internalHttp) registerHandlers() {
-	r := s.router
+	s.router.Use(middleware.MiddlewareLogging)
+	registerCubeRoutes(s.router)
+}
 
-	r.Use(middleware.MiddlewareLogging)
-
+// registerCubeRoutes wires every cube-master HTTP route onto r.  It is
+// extracted from registerHandlers so the route table can be exercised
+// from tests without standing up the full Server (which pulls in DB
+// pools, hotswap watchers, and the rest of the production wiring).
+//
+// The historical bug this guards against: gorilla/mux silently 404s
+// any path that has no HandleFunc entry, even when cube.HttpHandler's
+// internal switch knows how to handle it.  Forgetting one line here
+// (e.g. SandboxSnapshotAction) made every dyson-swarm rotation hang
+// on the snapshot phase.  Anyone editing this list should also touch
+// pkg/server/server_routes_test.go.
+func registerCubeRoutes(r *mux.Router) {
 	notifyGroup := r.PathPrefix(notify.NotifyURI()).Subrouter()
 	notifyGroup.HandleFunc(notify.HostChangeNotifyAction, notify.HttpHandler).Methods(http.MethodPost)
 	notifyGroup.HandleFunc(notify.HealthCheckAction, notify.HttpHandler).Methods(http.MethodGet)
