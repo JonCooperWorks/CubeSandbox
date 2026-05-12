@@ -88,6 +88,8 @@ func (s *internalHttp) registerHandlers() {
 	cubeGroup.HandleFunc(cube.SandboxExecAction, cube.HttpHandler).Methods(http.MethodPost)
 	cubeGroup.HandleFunc(cube.SandboxUpdateAction, cube.HttpHandler).Methods(http.MethodPost)
 	cubeGroup.HandleFunc(cube.SandboxCommitAction, cube.HttpHandler).Methods(http.MethodPost)
+	cubeGroup.HandleFunc(cube.SandboxSnapshotAction, cube.HttpHandler).Methods(http.MethodPost)
+	cubeGroup.HandleFunc(cube.SandboxSnapshotDeleteAction, cube.HttpHandler).Methods(http.MethodPost)
 	cubeGroup.HandleFunc(cube.TemplateAction, cube.HttpHandler).Methods(http.MethodGet, http.MethodPost, http.MethodDelete)
 	cubeGroup.HandleFunc(cube.TemplateRedoAction, cube.HttpHandler).Methods(http.MethodPost)
 	cubeGroup.HandleFunc(cube.TemplateBuildStatusAction+"/{build_id}/status", cube.HttpHandler).Methods(http.MethodGet)
