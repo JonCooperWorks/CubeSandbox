@@ -10,16 +10,25 @@ import (
 	"os"
 	"testing"
 
-	"github.com/tencentcloud/CubeSandbox/CubeNet/cubevs"
 	"github.com/cilium/ebpf"
+	"github.com/tencentcloud/CubeSandbox/CubeNet/cubevs"
 	"github.com/vishvananda/netlink"
 )
+
+func testDevNullFile(t *testing.T) *os.File {
+	t.Helper()
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("open %s: %v", os.DevNull, err)
+	}
+	return f
+}
 
 func TestCubeVSTapRegistration(t *testing.T) {
 	opts := cubeVSTapRegistration(&CubeVSContext{
 		AllowInternetAccess: boolPtr(true),
-		AllowOut:        []string{"10.0.0.0/8"},
-		DenyOut:         []string{"192.168.0.0/16"},
+		AllowOut:            []string{"10.0.0.0/8"},
+		DenyOut:             []string{"192.168.0.0/16"},
 	})
 	if opts.AllowInternetAccess == nil || *opts.AllowInternetAccess != true {
 		t.Fatalf("opts.AllowInternetAccess=%v, want true", opts.AllowInternetAccess)
@@ -213,7 +222,7 @@ func TestRecoverCleansOrphanTapsWithoutPersistedState(t *testing.T) {
 			Name:  tap.Name,
 			Index: tap.Index,
 			IP:    tap.IP,
-			File:  os.NewFile(uintptr(1), "/dev/null"),
+			File:  testDevNullFile(t),
 		}, nil
 	}
 	cubevsListTAPDevices = func() ([]cubevs.TAPDevice, error) { return nil, nil }
@@ -305,7 +314,7 @@ func TestRecoverKeepsPersistedTapAndRemovesOnlyOrphans(t *testing.T) {
 			Name:  tap.Name,
 			Index: tap.Index,
 			IP:    tap.IP,
-			File:  os.NewFile(uintptr(1), "/dev/null"),
+			File:  testDevNullFile(t),
 		}, nil
 	}
 	cubevsAttachFilter = func(uint32) error { return nil }

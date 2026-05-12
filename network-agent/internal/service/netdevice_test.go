@@ -5,12 +5,82 @@
 package service
 
 import (
+	"fmt"
 	"net"
 	"testing"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
+
+func TestGetGatewayMacAddrAcceptsUsableNeighborStates(t *testing.T) {
+	originalLinkByName := netlinkLinkByName
+	originalNeighList := netlinkNeighList
+	defer func() {
+		netlinkLinkByName = originalLinkByName
+		netlinkNeighList = originalNeighList
+	}()
+
+	netlinkLinkByName = func(name string) (netlink.Link, error) {
+		if name != "eth0" {
+			t.Fatalf("link name=%q, want eth0", name)
+		}
+		return &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Index: 7, Name: name}}, nil
+	}
+	wantMAC := "02:00:00:00:00:01"
+	hw, err := net.ParseMAC(wantMAC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	netlinkNeighList = func(index int, family int) ([]netlink.Neigh, error) {
+		if index != 7 {
+			t.Fatalf("neigh index=%d, want 7", index)
+		}
+		return []netlink.Neigh{{
+			Family:       netlink.FAMILY_V4,
+			State:        unix.NUD_STALE,
+			HardwareAddr: hw,
+		}}, nil
+	}
+
+	got, err := getGatewayMacAddr("eth0")
+	if err != nil {
+		t.Fatalf("getGatewayMacAddr error=%v", err)
+	}
+	if got != wantMAC {
+		t.Fatalf("gateway mac=%q, want %q", got, wantMAC)
+	}
+}
+
+func TestGetGatewayMacAddrRejectsFailedNeighbor(t *testing.T) {
+	originalLinkByName := netlinkLinkByName
+	originalNeighList := netlinkNeighList
+	defer func() {
+		netlinkLinkByName = originalLinkByName
+		netlinkNeighList = originalNeighList
+	}()
+
+	netlinkLinkByName = func(name string) (netlink.Link, error) {
+		return &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Index: 7, Name: name}}, nil
+	}
+	hw, err := net.ParseMAC("02:00:00:00:00:01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	netlinkNeighList = func(index int, family int) ([]netlink.Neigh, error) {
+		return []netlink.Neigh{{
+			Family:       netlink.FAMILY_V4,
+			State:        unix.NUD_FAILED,
+			HardwareAddr: hw,
+		}}, nil
+	}
+
+	if _, err := getGatewayMacAddr("eth0"); err == nil {
+		t.Fatal("getGatewayMacAddr error=nil, want failure")
+	} else if got := fmt.Sprint(err); got != "usable gateway mac not found on eth0" {
+		t.Fatalf("error=%q", got)
+	}
+}
 
 func TestEnsureRouteToCubeDev(t *testing.T) {
 	originalReplace := netlinkRouteReplace
