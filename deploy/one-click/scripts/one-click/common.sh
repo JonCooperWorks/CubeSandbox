@@ -116,14 +116,24 @@ start_with_pidfile() {
   fi
 
   if [[ -n "${runas}" ]]; then
-    require_cmd runuser
     id "${runas}" >/dev/null 2>&1 || die "runas user '${runas}' does not exist"
-    nohup env -i \
-      PATH="${clean_path}" \
-      HOME="/tmp" \
-      LANG="${clean_lang}" \
-      SHELL="/bin/bash" \
-      runuser -u "${runas}" -- bash -c "${cmd}" >"${log_file}" 2>&1 &
+    if command -v setpriv >/dev/null 2>&1; then
+      nohup env -i \
+        PATH="${clean_path}" \
+        HOME="/tmp" \
+        LANG="${clean_lang}" \
+        SHELL="/bin/bash" \
+        setpriv --reuid "${runas}" --regid "${runas}" --init-groups \
+        bash -c "${cmd}" >"${log_file}" 2>&1 &
+    else
+      require_cmd runuser
+      nohup env -i \
+        PATH="${clean_path}" \
+        HOME="/tmp" \
+        LANG="${clean_lang}" \
+        SHELL="/bin/bash" \
+        runuser -u "${runas}" -- bash -c "${cmd}" >"${log_file}" 2>&1 &
+    fi
   else
     nohup env -i \
       PATH="${clean_path}" \
