@@ -10,12 +10,12 @@ use axum::{
 };
 
 use crate::{
-    error::AppResult,
+    error::{AppError, AppResult},
     logging::{LogEvent, LogLevel},
     models::{
-        ApiError, ConnectSandbox, CreateSnapshotRequest, ListSandboxesQuery, ListSandboxesV2Query,
-        NewSandbox, RefreshRequest, ResumedSandbox, Sandbox, SandboxDetail, SandboxLogsQuery,
-        SandboxLogsV2Query, SandboxLogsV2Response, SetTimeoutRequest,
+        ApiError, ConnectSandbox, CreateSnapshotRequest, DeleteSnapshotQuery, ListSandboxesQuery,
+        ListSandboxesV2Query, NewSandbox, RefreshRequest, ResumedSandbox, Sandbox, SandboxDetail,
+        SandboxLogsQuery, SandboxLogsV2Query, SandboxLogsV2Response, SetTimeoutRequest,
     },
     state::AppState,
 };
@@ -515,6 +515,46 @@ pub async fn refresh_sandbox(
             LogEvent::new(LogLevel::Info, "sandbox.refreshed")
                 .field("sandbox_id", &sandbox_id)
                 .field_value("duration", duration),
+        )
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ─── DELETE /sandboxes/snapshots/:snapshotID ─────────────────────────────────
+
+pub async fn delete_snapshot(
+    State(state): State<AppState>,
+    Path(snapshot_id): Path<String>,
+    Query(params): Query<DeleteSnapshotQuery>,
+) -> AppResult<impl IntoResponse> {
+    state
+        .logger
+        .log(
+            LogEvent::new(LogLevel::Debug, "api.request")
+                .field("handler", "delete_snapshot")
+                .field("snapshot_id", &snapshot_id)
+                .field("host_ip", &params.host_ip),
+        )
+        .await;
+
+    if params.host_ip.trim().is_empty() {
+        return Err(AppError::BadRequest(
+            "hostIP query parameter is required".to_string(),
+        ));
+    }
+
+    state
+        .services
+        .sandboxes
+        .delete_snapshot(&snapshot_id, &params.host_ip)
+        .await?;
+
+    tracing::info!(snapshot_id = %snapshot_id, "delete_snapshot: success");
+    state
+        .logger
+        .log(
+            LogEvent::new(LogLevel::Info, "sandbox.snapshot.deleted")
+                .field("snapshot_id", &snapshot_id),
         )
         .await;
     Ok(StatusCode::NO_CONTENT)

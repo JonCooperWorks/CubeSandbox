@@ -100,6 +100,10 @@ fn build_sandbox_routes(state: &AppState, auth_configured: bool) -> Router<AppSt
         .route(
             "/sandboxes/:sandboxID/snapshots",
             post(sandboxes::create_snapshot),
+        )
+        .route(
+            "/sandboxes/snapshots/:snapshotID",
+            delete(sandboxes::delete_snapshot),
         );
 
     with_auth_and_rate_limit(routes, state, auth_configured)

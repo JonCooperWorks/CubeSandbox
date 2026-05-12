@@ -11,8 +11,8 @@ use crate::{
     cubemaster::{
         extract_template_id, CreateSandboxRequest, CubeMasterClient, CubeMasterError,
         CubeVSContext, DeleteSandboxRequest, ListSandboxRequest, SandboxInfo, SandboxLogsRequest,
-        SandboxRefreshRequest, SandboxSnapshotRequest, SandboxStatus, SandboxTimeoutRequest,
-        SandboxUpdateRequest,
+        SandboxRefreshRequest, SandboxSnapshotDeleteRequest, SandboxSnapshotRequest,
+        SandboxStatus, SandboxTimeoutRequest, SandboxUpdateRequest,
     },
     error::{AppError, AppResult},
     models::{
@@ -125,6 +125,17 @@ impl SandboxService {
                 "v2".to_string(),
             ),
         ]);
+
+        if let Some(ref snapshot) = body.from_snapshot {
+            annotations.insert(
+                "cube.vm.snapshot.base.path".to_string(),
+                snapshot.path.clone(),
+            );
+            annotations.insert(
+                "cube.appsnapshot.restore".to_string(),
+                "true".to_string(),
+            );
+        }
 
         let labels = body.metadata.map(|mut meta| {
             if let Some(value) = meta.remove(HOSTDIR_MOUNT_KEY) {
@@ -275,11 +286,23 @@ impl SandboxService {
                     } else {
                         resp.names
                     },
+                    path: if resp.path.is_empty() {
+                        None
+                    } else {
+                        Some(resp.path)
+                    },
+                    host_ip: if resp.host_ip.is_empty() {
+                        None
+                    } else {
+                        Some(resp.host_ip)
+                    },
                 })
             }
             Err(e) if e.is_endpoint_missing() => Ok(SnapshotInfo {
                 snapshot_id: new_request_id(),
                 names,
+                path: None,
+                host_ip: None,
             }),
             Err(e) if e.is_not_found() => Err(AppError::NotFound(format!(
                 "sandbox {} not found",
@@ -287,6 +310,30 @@ impl SandboxService {
             ))),
             Err(e) => Err(internal_error(e)),
         }
+    }
+
+    pub async fn delete_snapshot(&self, snapshot_id: &str, host_ip: &str) -> AppResult<()> {
+        let req = SandboxSnapshotDeleteRequest {
+            request_id: new_request_id(),
+            snapshot_id: snapshot_id.to_string(),
+            host_ip: host_ip.to_string(),
+        };
+
+        let resp = self
+            .cubemaster
+            .delete_sandbox_snapshot(&req)
+            .await
+            .map_err(internal_error)?;
+
+        resp.ret.into_result().map_err(|e| {
+            if e.is_not_found() {
+                AppError::NotFound(format!("snapshot {} not found", snapshot_id))
+            } else {
+                internal_error(e)
+            }
+        })?;
+
+        Ok(())
     }
 
     pub async fn get_logs(
